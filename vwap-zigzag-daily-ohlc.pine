@@ -1,0 +1,318 @@
+//@version=6
+indicator("統合版：VWAP & Zig Zag & 単日四本値", overlay=true, max_lines_count=500, max_labels_count=500)
+
+import TradingView/ZigZag/7 as ZigZagLib
+
+// ============================================================================
+// 設定グループの定義
+// ============================================================================
+
+VWAP_GROUP = "期間別VWAP設定"
+BANDS_GROUP = "バンド設定"
+MA_GROUP = "移動平均線設定"
+DAILY_GROUP = "単日四本値設定"
+COLOR_GROUP = "色設定"
+LABEL_GROUP = "ラベル・テーブル設定"
+PREV_HTF_GROUP = "前日の四本値設定"
+ZIGZAG_GROUP = "Zig Zag設定"
+
+// ============================================================================
+// VWAP設定
+// ============================================================================
+
+hideonDWM = input(false, title="日足以上ではVWAPを非表示", group=VWAP_GROUP, display=display.data_window)
+offset_vwap = input.int(0, title="オフセット", group=VWAP_GROUP, minval=0, display=display.data_window)
+vwap_line_color = input.color(#2962FF, "VWAPラインの色", group=VWAP_GROUP)
+vwap_line_width = input.int(2, "VWAPラインの太さ", group=VWAP_GROUP, minval=1, maxval=5)
+
+// ============================================================================
+// バンド設定
+// ============================================================================
+
+showBand_1 = input(true, title="", group=BANDS_GROUP, inline="band_1", display=display.data_window)
+bandMult_1 = input.float(1.0, title="バンド乗数 #1", group=BANDS_GROUP, inline="band_1", step=0.5, minval=0, display=display.data_window, active=showBand_1)
+band1_color = input.color(color.green, "バンド #1の色", group=BANDS_GROUP, inline="band_1_color")
+band1_width = input.int(1, "バンド #1の太さ", group=BANDS_GROUP, inline="band_1_width", minval=1, maxval=5)
+band1_fill_color = input.color(color.new(color.green, 95), "バンド #1の塗りつぶし", group=BANDS_GROUP, inline="band_1_color")
+
+// ============================================================================
+// 移動平均線設定
+// ============================================================================
+
+show_ma5 = input.bool(true, "5本移動平均線を表示", group=MA_GROUP)
+ma5_color = input.color(color.yellow, "5本MAの色", group=MA_GROUP)
+ma5_width = input.int(2, "5本MAの太さ", group=MA_GROUP, minval=1, maxval=5)
+
+show_ma20 = input.bool(true, "20本移動平均線を表示", group=MA_GROUP)
+ma20_color = input.color(color.orange, "20本MAの色", group=MA_GROUP)
+ma20_width = input.int(2, "20本MAの太さ", group=MA_GROUP, minval=1, maxval=5)
+
+ma_source = input.source(close, "MA計算ソース", group=MA_GROUP)
+
+// ============================================================================
+// 単日四本値設定
+// ============================================================================
+
+target_date = input.int(20250613, "表示対象日 (YYYYMMDD)", group=DAILY_GROUP, minval=20000101, maxval=20991231)
+show_daily_ohlc_input = input.bool(false, "四本値を表示", group=DAILY_GROUP)
+
+show_daily_ohlc = timeframe.isdwm ? false : show_daily_ohlc_input
+
+// ============================================================================
+// 色設定
+// ============================================================================
+
+open_color = input.color(color.white, "始値の色", group=COLOR_GROUP)
+high_color = input.color(color.green, "高値の色", group=COLOR_GROUP)
+low_color = input.color(color.red, "安値の色", group=COLOR_GROUP)
+close_color = input.color(color.gray, "終値の色", group=COLOR_GROUP)
+daily_vwap_color = input.color(color.aqua, "単日VWAPの色", group=COLOR_GROUP)
+line_width = input.int(2, "ライン幅", minval=1, maxval=5, group=COLOR_GROUP)
+
+// ============================================================================
+// ラベル・テーブル設定
+// ============================================================================
+
+show_labels = input.bool(true, "価格ラベルを表示", group=LABEL_GROUP)
+label_offset = input.int(10, "ラベルオフセット", minval=0, maxval=50, group=LABEL_GROUP)
+show_table = input.bool(true, "情報テーブルを表示", group=LABEL_GROUP)
+table_position = input.string("右上", "テーブル位置", options=["右上", "左上", "右下", "左下"], group=LABEL_GROUP)
+
+// ============================================================================
+// 前日の四本値設定
+// ============================================================================
+
+show_prev_htf_input = input.bool(true, "前日の四本値を表示", group=PREV_HTF_GROUP)
+show_prev_htf = timeframe.isdwm ? false : show_prev_htf_input
+prev_htf_open_color = input.color(color.white, "前日始値の色", group=PREV_HTF_GROUP)
+prev_htf_close_color = input.color(color.gray, "前日終値の色", group=PREV_HTF_GROUP)
+prev_htf_high_color = input.color(color.green, "前日高値の色", group=PREV_HTF_GROUP)
+prev_htf_low_color = input.color(color.red, "前日安値の色", group=PREV_HTF_GROUP)
+prev_htf_line_width = input.int(1, "前日ラインの太さ", minval=1, maxval=5, group=PREV_HTF_GROUP)
+
+// ============================================================================
+// Zig Zag設定
+// ============================================================================
+
+show_zigzag = input.bool(true, "Zig Zagを表示", group=ZIGZAG_GROUP, display=display.data_window)
+deviationInput = input.float(5.0, "Price deviation for reversals (%)", minval=0.00001, maxval=100.0, step=0.5, group=ZIGZAG_GROUP, display=display.data_window, active=show_zigzag)
+depthInput = input.int(10, "Pivot legs", minval=2, group=ZIGZAG_GROUP, display=display.data_window, active=show_zigzag)
+zigZagLineColorInput = input.color(#FF6B35, "Zig Zag line color", group=ZIGZAG_GROUP, display=display.data_window, active=show_zigzag)
+extendInput = input.bool(true, "Extend to last bar", group=ZIGZAG_GROUP, display=display.data_window, active=show_zigzag)
+showPriceInput = input.bool(true, "Display reversal price", group=ZIGZAG_GROUP, display=display.data_window, active=show_zigzag)
+showVolInput = input.bool(true, "Display cumulative volume", group=ZIGZAG_GROUP, display=display.data_window, active=show_zigzag)
+showChgInput = input.bool(true, "Display reversal price change", group=ZIGZAG_GROUP, display=display.data_window, active=show_zigzag)
+priceDiffInput = input.string("Absolute", "Price change format", options=["Absolute", "Percent"], group=ZIGZAG_GROUP, display=display.data_window, active=show_zigzag)
+
+// ============================================================================
+// グローバル変数の初期化
+// ============================================================================
+
+// 単日四本値関連
+var float daily_open = na
+var float daily_high = na
+var float daily_low = na
+var float daily_close = na
+var float sum_price_volume = 0.0
+var float sum_volume = 0.0
+var float daily_vwap_value = na
+
+// ラベル関連
+var label open_label = na
+var label high_label = na
+var label low_label = na
+var label close_label = na
+var label daily_vwap_label = na
+
+// 前日の四本値関連
+var float prevOpenHTF = na
+var float prevCloseHTF = na
+var float prevHighHTF = na
+var float prevLowHTF = na
+var line prevOpenHTF_line = na
+var line prevCloseHTF_line = na
+var line prevHighHTF_line = na
+var line prevLowHTF_line = na
+
+// ============================================================================
+// Zig Zag インスタンス作成と更新
+// ============================================================================
+
+var zigZagSettings = ZigZagLib.Settings.new(deviationInput, depthInput, zigZagLineColorInput, extendInput, showPriceInput, showVolInput, showChgInput, priceDiffInput, true)
+var zigZag = ZigZagLib.newInstance(zigZagSettings)
+
+if show_zigzag
+    zigZag.update()
+
+// ============================================================================
+// VWAP計算
+// ============================================================================
+
+cumVolume = ta.cum(volume)
+if barstate.islast and cumVolume == 0
+    runtime.error("出来高データがありません。")
+
+isNewPeriod = timeframe.change("D")
+src_vwap = hlc3
+
+float vwapValue = na
+float upperBandValue1 = na
+float lowerBandValue1 = na
+
+if not (hideonDWM and timeframe.isdwm)
+    [_vwap, _stdevUpper, _] = ta.vwap(src_vwap, isNewPeriod, 1)
+    vwapValue := _vwap
+    stdevAbs = _stdevUpper - _vwap
+    upperBandValue1 := _vwap + stdevAbs * bandMult_1
+    lowerBandValue1 := _vwap - stdevAbs * bandMult_1
+
+// ============================================================================
+// 移動平均線計算
+// ============================================================================
+
+ma5 = ta.sma(ma_source, 5)
+ma20 = ta.sma(ma_source, 20)
+
+// ============================================================================
+// 前日の四本値取得
+// ============================================================================
+
+if show_prev_htf
+    prevOpenHTF := request.security(syminfo.tickerid, "D", open[1], lookahead=barmerge.lookahead_on)
+    prevCloseHTF := request.security(syminfo.tickerid, "D", close[1], lookahead=barmerge.lookahead_on)
+    prevHighHTF := request.security(syminfo.tickerid, "D", high[1], lookahead=barmerge.lookahead_on)
+    prevLowHTF := request.security(syminfo.tickerid, "D", low[1], lookahead=barmerge.lookahead_on)
+
+// ============================================================================
+// 単日四本値計算
+// ============================================================================
+
+is_new_day = ta.change(time("1D")) != 0
+current_date = year * 10000 + month * 100 + dayofmonth
+is_target_date_bar = current_date == target_date
+
+if is_new_day
+    daily_open := open
+    daily_high := high
+    daily_low := low
+    daily_close := close
+    sum_price_volume := hlc3 * volume
+    sum_volume := volume
+    daily_vwap_value := sum_price_volume / sum_volume
+else
+    daily_high := math.max(daily_high, high)
+    daily_low := math.min(daily_low, low)
+    daily_close := close
+    sum_price_volume += hlc3 * volume
+    sum_volume += volume
+    daily_vwap_value := sum_price_volume / sum_volume
+
+// ============================================================================
+// プロット
+// ============================================================================
+
+// VWAP
+plot(vwapValue, title="VWAP", color=vwap_line_color, linewidth=vwap_line_width, offset=offset_vwap)
+
+// バンド
+upperBand_1 = plot(upperBandValue1, title="Upper Band #1", color=band1_color, linewidth=band1_width, offset=offset_vwap, display=showBand_1 ? display.all : display.none)
+lowerBand_1 = plot(lowerBandValue1, title="Lower Band #1", color=band1_color, linewidth=band1_width, offset=offset_vwap, display=showBand_1 ? display.all : display.none)
+fill(upperBand_1, lowerBand_1, title="Bands Fill #1", color=band1_fill_color, display=showBand_1 ? display.all : display.none)
+
+// 移動平均線
+plot(show_ma5 ? ma5 : na, title="5本移動平均", color=ma5_color, linewidth=ma5_width)
+plot(show_ma20 ? ma20 : na, title="20本移動平均", color=ma20_color, linewidth=ma20_width)
+
+// 単日四本値
+plot(is_target_date_bar and show_daily_ohlc and not na(daily_open) ? daily_open : na, title="始値", color=open_color, linewidth=line_width)
+plot(is_target_date_bar and show_daily_ohlc and not na(daily_high) ? daily_high : na, title="高値", color=high_color, linewidth=line_width)
+plot(is_target_date_bar and show_daily_ohlc and not na(daily_low) ? daily_low : na, title="安値", color=low_color, linewidth=line_width)
+plot(is_target_date_bar and show_daily_ohlc and not na(daily_close) ? daily_close : na, title="終値", color=close_color, linewidth=line_width)
+
+// ============================================================================
+// 前日の四本値ラインを更新
+// ============================================================================
+
+if show_prev_htf
+    if prevOpenHTF[1] != prevOpenHTF
+        line.set_x2(prevOpenHTF_line, bar_index)
+        line.set_x2(prevCloseHTF_line, bar_index)
+        line.set_x2(prevHighHTF_line, bar_index)
+        line.set_x2(prevLowHTF_line, bar_index)
+        line.set_extend(prevOpenHTF_line, extend.none)
+        line.set_extend(prevCloseHTF_line, extend.none)
+        line.set_extend(prevHighHTF_line, extend.none)
+        line.set_extend(prevLowHTF_line, extend.none)
+        prevOpenHTF_line := line.new(bar_index, prevOpenHTF, bar_index, prevOpenHTF, extend=extend.right, width=prev_htf_line_width, color=prev_htf_open_color)
+        prevCloseHTF_line := line.new(bar_index, prevCloseHTF, bar_index, prevCloseHTF, extend=extend.right, width=prev_htf_line_width, color=prev_htf_close_color)
+        prevHighHTF_line := line.new(bar_index, prevHighHTF, bar_index, prevHighHTF, extend=extend.right, width=prev_htf_line_width, color=prev_htf_high_color)
+        prevLowHTF_line := line.new(bar_index, prevLowHTF, bar_index, prevLowHTF, extend=extend.right, width=prev_htf_line_width, color=prev_htf_low_color)
+        label.new(bar_index, prevOpenHTF, "OPEN", style=label.style_none, textcolor=prev_htf_open_color, textalign=text.align_right)
+        label.new(bar_index, prevCloseHTF, "CLOSE", style=label.style_none, textcolor=prev_htf_close_color, textalign=text.align_right)
+        label.new(bar_index, prevHighHTF, "HIGH", style=label.style_none, textcolor=prev_htf_high_color, textalign=text.align_right)
+        label.new(bar_index, prevLowHTF, "LOW", style=label.style_none, textcolor=prev_htf_low_color, textalign=text.align_right)
+    
+    if not na(prevOpenHTF_line) and line.get_x2(prevOpenHTF_line) != bar_index
+        line.set_x2(prevOpenHTF_line, bar_index)
+        line.set_x2(prevCloseHTF_line, bar_index)
+        line.set_x2(prevHighHTF_line, bar_index)
+        line.set_x2(prevLowHTF_line, bar_index)
+
+// ============================================================================
+// ラベル・テーブル表示
+// ============================================================================
+
+show_label_condition = is_target_date_bar and barstate.islast
+
+if show_labels and show_label_condition and show_daily_ohlc
+    label.delete(open_label)
+    label.delete(high_label)
+    label.delete(low_label)
+    label.delete(close_label)
+    label.delete(daily_vwap_label)
+    
+    label_x = bar_index + label_offset
+    
+    if not na(daily_open)
+        open_label := label.new(label_x, daily_open, text="始値：" + str.tostring(daily_open, "#.##"), color=color.new(open_color, 80), textcolor=open_color, style=label.style_label_left, size=size.small)
+    
+    if not na(daily_high)
+        high_label := label.new(label_x, daily_high, text="高値：" + str.tostring(daily_high, "#.##"), color=color.new(high_color, 80), textcolor=high_color, style=label.style_label_left, size=size.small)
+    
+    if not na(daily_low)
+        low_label := label.new(label_x, daily_low, text="安値：" + str.tostring(daily_low, "#.##"), color=color.new(low_color, 80), textcolor=low_color, style=label.style_label_left, size=size.small)
+    
+    if not na(daily_close)
+        close_label := label.new(label_x, daily_close, text="終値：" + str.tostring(daily_close, "#.##"), color=color.new(close_color, 80), textcolor=close_color, style=label.style_label_left, size=size.small)
+
+// テーブル表示（日足以上では表示しない）
+if show_table and show_label_condition and not timeframe.isdwm and show_daily_ohlc
+    table_pos = switch table_position
+        "右上" => position.top_right
+        "左上" => position.top_left
+        "右下" => position.bottom_right
+        "左下" => position.bottom_left
+        => position.top_right
+    
+    var table info_table = table.new(table_pos, 2, 7, bgcolor=color.white, border_width=1, border_color=color.gray)
+    
+    target_year = int(target_date / 10000)
+    target_month = int((target_date % 10000) / 100)
+    target_day = int(target_date % 100)
+    target_date_str = str.tostring(target_year) + "/" + str.tostring(target_month) + "/" + str.tostring(target_day)
+    
+    table.cell(info_table, 0, 0, "項目", text_color=color.black, bgcolor=color.new(color.gray, 50), text_size=size.normal)
+    table.cell(info_table, 1, 0, "価格", text_color=color.black, bgcolor=color.new(color.gray, 50), text_size=size.normal)
+    
+    table.cell(info_table, 0, 1, "対象日", text_color=color.black, text_size=size.normal)
+    table.cell(info_table, 1, 1, target_date_str, text_color=color.black, text_size=size.normal)
+    table.cell(info_table, 0, 2, "始値", text_color=color.black, text_size=size.normal)
+    table.cell(info_table, 1, 2, str.tostring(daily_open, "#.##"), text_color=color.black, text_size=size.normal)
+    table.cell(info_table, 0, 3, "高値", text_color=color.black, text_size=size.normal)
+    table.cell(info_table, 1, 3, str.tostring(daily_high, "#.##"), text_color=color.black, text_size=size.normal)
+    table.cell(info_table, 0, 4, "安値", text_color=color.black, text_size=size.normal)
+    table.cell(info_table, 1, 4, str.tostring(daily_low, "#.##"), text_color=color.black, text_size=size.normal)
+    table.cell(info_table, 0, 5, "終値", text_color=color.black, text_size=size.normal)
+    table.cell(info_table, 1, 5, str.tostring(daily_close, "#.##"), text_color=color.black, text_size=size.normal)
+    table.cell(info_table, 0, 6, "VWAP", text_color=color.black, text_size=size.normal)
+    table.cell(info_table, 1, 6, str.tostring(daily_vwap_value, "#.##"), text_color=color.black, text_size=size.normal)
