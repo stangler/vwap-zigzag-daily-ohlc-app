@@ -134,6 +134,11 @@ var line prevCloseHTF_line = na
 var line prevHighHTF_line = na
 var line prevLowHTF_line = na
 
+// テーブル関連
+// [整理] var 宣言はグローバルスコープで行う。if ブロック内の宣言から移動。
+//        position は barstate.islast 時に上書きするため、ここでは仮の値を設定。
+var table info_table = table.new(position.top_right, 2, 7, bgcolor=color.white, border_width=1, border_color=color.gray)
+
 // ============================================================================
 // Zig Zag インスタンス作成と更新
 // ============================================================================
@@ -240,7 +245,9 @@ plot(is_target_date_bar and show_daily_ohlc and not na(daily_close) ? daily_clos
 // ============================================================================
 
 if show_prev_htf
-    if prevOpenHTF[1] != prevOpenHTF
+    // [整理] prevOpenHTF[1] != prevOpenHTF は浮動小数点比較で不安定なため
+    //         timeframe.change("D") で日付変化を検知する方式に変更。
+    if timeframe.change("D")
         line.set_x2(prevOpenHTF_line, bar_index)
         line.set_x2(prevCloseHTF_line, bar_index)
         line.set_x2(prevHighHTF_line, bar_index)
@@ -301,15 +308,18 @@ if show_labels and show_label_condition and show_daily_ohlc
 
 // テーブル表示（日足以上では表示しない）
 if show_table and show_label_condition and not timeframe.isdwm and show_daily_ohlc
+    // [整理] table の position は後から変更不可のため、barstate.islast 時に
+    //         ユーザー選択の position で毎回 table.new して info_table を上書きする。
+    //         var 宣言はグローバルスコープで行い、ここでは代入のみ。
     table_pos = switch table_position
         "右上" => position.top_right
         "左上" => position.top_left
         "右下" => position.bottom_right
         "左下" => position.bottom_left
         => position.top_right
-    
-    var table info_table = table.new(table_pos, 2, 7, bgcolor=color.white, border_width=1, border_color=color.gray)
-    
+    table.delete(info_table)
+    info_table := table.new(table_pos, 2, 7, bgcolor=color.white, border_width=1, border_color=color.gray)
+
     target_year = int(target_date / 10000)
     target_month = int((target_date % 10000) / 100)
     target_day = int(target_date % 100)
