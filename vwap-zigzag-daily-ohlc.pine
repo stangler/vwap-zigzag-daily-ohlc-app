@@ -134,6 +134,10 @@ var line prevCloseHTF_line = na
 var line prevHighHTF_line = na
 var line prevLowHTF_line = na
 
+// テーブルをグローバルスコープで宣言
+// barstate.islast 時に table.delete → table.new で position を再適用する
+var table info_table = na
+
 // ============================================================================
 // Zig Zag インスタンス作成と更新
 // ============================================================================
@@ -175,20 +179,18 @@ ma20 = ta.sma(ma_source, 20)
 
 // ============================================================================
 // 前日の四本値取得
+// [fix] lookahead_off では確定済み日足が基準になるため
+//       [1] オフセットは不要。削除することで前日値を正しく取得する。
 // ============================================================================
 
 if show_prev_htf
-    // [修正] lookahead_on → lookahead_off（open[1]で既にオフセット済みのため不要）
-    prevOpenHTF := request.security(syminfo.tickerid, "D", open[1], lookahead=barmerge.lookahead_off)
-    prevCloseHTF := request.security(syminfo.tickerid, "D", close[1], lookahead=barmerge.lookahead_off)
-    prevHighHTF := request.security(syminfo.tickerid, "D", high[1], lookahead=barmerge.lookahead_off)
-    prevLowHTF := request.security(syminfo.tickerid, "D", low[1], lookahead=barmerge.lookahead_off)
+    prevOpenHTF  := request.security(syminfo.tickerid, "D", open,  lookahead=barmerge.lookahead_off)
+    prevCloseHTF := request.security(syminfo.tickerid, "D", close, lookahead=barmerge.lookahead_off)
+    prevHighHTF  := request.security(syminfo.tickerid, "D", high,  lookahead=barmerge.lookahead_off)
+    prevLowHTF   := request.security(syminfo.tickerid, "D", low,   lookahead=barmerge.lookahead_off)
 
 // ============================================================================
 // 単日四本値計算
-// [修正] 対象日のバーのみリセット・更新するよう修正。
-//        修正前は全日でリセットされ、対象日以外のバーでも
-//        sum_price_volume / sum_volume が書き換わっていた。
 // ============================================================================
 
 is_new_day = ta.change(time("1D")) != 0
@@ -197,7 +199,6 @@ is_target_date_bar = current_date == target_date
 
 if is_target_date_bar
     if is_new_day
-        // 対象日の最初のバー：全値をリセットして初期化
         daily_open := open
         daily_high := high
         daily_low := low
@@ -205,7 +206,6 @@ if is_target_date_bar
         sum_price_volume := hlc3 * volume
         sum_volume := volume
     else
-        // 対象日の2本目以降：高値・安値・終値・累計を更新
         daily_high := math.max(daily_high, high)
         daily_low := math.min(daily_low, low)
         daily_close := close
@@ -240,7 +240,7 @@ plot(is_target_date_bar and show_daily_ohlc and not na(daily_close) ? daily_clos
 // ============================================================================
 
 if show_prev_htf
-    if prevOpenHTF[1] != prevOpenHTF
+    if timeframe.change("D")
         line.set_x2(prevOpenHTF_line, bar_index)
         line.set_x2(prevCloseHTF_line, bar_index)
         line.set_x2(prevHighHTF_line, bar_index)
@@ -249,29 +249,25 @@ if show_prev_htf
         line.set_extend(prevCloseHTF_line, extend.none)
         line.set_extend(prevHighHTF_line, extend.none)
         line.set_extend(prevLowHTF_line, extend.none)
-        prevOpenHTF_line := line.new(bar_index, prevOpenHTF, bar_index, prevOpenHTF, extend=extend.right, width=prev_htf_line_width, color=prev_htf_open_color)
+        prevOpenHTF_line  := line.new(bar_index, prevOpenHTF,  bar_index, prevOpenHTF,  extend=extend.right, width=prev_htf_line_width, color=prev_htf_open_color)
         prevCloseHTF_line := line.new(bar_index, prevCloseHTF, bar_index, prevCloseHTF, extend=extend.right, width=prev_htf_line_width, color=prev_htf_close_color)
-        prevHighHTF_line := line.new(bar_index, prevHighHTF, bar_index, prevHighHTF, extend=extend.right, width=prev_htf_line_width, color=prev_htf_high_color)
-        prevLowHTF_line := line.new(bar_index, prevLowHTF, bar_index, prevLowHTF, extend=extend.right, width=prev_htf_line_width, color=prev_htf_low_color)
-        label.new(bar_index, prevOpenHTF, "OPEN", style=label.style_none, textcolor=prev_htf_open_color, textalign=text.align_right)
+        prevHighHTF_line  := line.new(bar_index, prevHighHTF,  bar_index, prevHighHTF,  extend=extend.right, width=prev_htf_line_width, color=prev_htf_high_color)
+        prevLowHTF_line   := line.new(bar_index, prevLowHTF,   bar_index, prevLowHTF,   extend=extend.right, width=prev_htf_line_width, color=prev_htf_low_color)
+        label.new(bar_index, prevOpenHTF,  "OPEN",  style=label.style_none, textcolor=prev_htf_open_color,  textalign=text.align_right)
         label.new(bar_index, prevCloseHTF, "CLOSE", style=label.style_none, textcolor=prev_htf_close_color, textalign=text.align_right)
-        label.new(bar_index, prevHighHTF, "HIGH", style=label.style_none, textcolor=prev_htf_high_color, textalign=text.align_right)
-        label.new(bar_index, prevLowHTF, "LOW", style=label.style_none, textcolor=prev_htf_low_color, textalign=text.align_right)
-    
+        label.new(bar_index, prevHighHTF,  "HIGH",  style=label.style_none, textcolor=prev_htf_high_color,  textalign=text.align_right)
+        label.new(bar_index, prevLowHTF,   "LOW",   style=label.style_none, textcolor=prev_htf_low_color,   textalign=text.align_right)
+
     if not na(prevOpenHTF_line) and line.get_x2(prevOpenHTF_line) != bar_index
-        line.set_x2(prevOpenHTF_line, bar_index)
+        line.set_x2(prevOpenHTF_line,  bar_index)
         line.set_x2(prevCloseHTF_line, bar_index)
-        line.set_x2(prevHighHTF_line, bar_index)
-        line.set_x2(prevLowHTF_line, bar_index)
+        line.set_x2(prevHighHTF_line,  bar_index)
+        line.set_x2(prevLowHTF_line,   bar_index)
 
 // ============================================================================
 // ラベル・テーブル表示
-// [修正1] show_label_condition から is_target_date_bar を除去。
-//         対象日のデータ取得済み（not na）かつ最終バーであれば表示する。
-// [修正2] daily_vwap_label の label.new が未実装だったため追加。
 // ============================================================================
 
-// [修正1] 対象日が過去でも最終バーにラベルを表示できるよう条件を修正
 show_label_condition = barstate.islast and not na(daily_open)
 
 if show_labels and show_label_condition and show_daily_ohlc
@@ -280,26 +276,24 @@ if show_labels and show_label_condition and show_daily_ohlc
     label.delete(low_label)
     label.delete(close_label)
     label.delete(daily_vwap_label)
-    
+
     label_x = bar_index + label_offset
-    
+
     if not na(daily_open)
         open_label := label.new(label_x, daily_open, text="始値：" + str.tostring(daily_open, "#.##"), color=color.new(open_color, 80), textcolor=open_color, style=label.style_label_left, size=size.small)
-    
+
     if not na(daily_high)
         high_label := label.new(label_x, daily_high, text="高値：" + str.tostring(daily_high, "#.##"), color=color.new(high_color, 80), textcolor=high_color, style=label.style_label_left, size=size.small)
-    
+
     if not na(daily_low)
         low_label := label.new(label_x, daily_low, text="安値：" + str.tostring(daily_low, "#.##"), color=color.new(low_color, 80), textcolor=low_color, style=label.style_label_left, size=size.small)
-    
+
     if not na(daily_close)
         close_label := label.new(label_x, daily_close, text="終値：" + str.tostring(daily_close, "#.##"), color=color.new(close_color, 80), textcolor=close_color, style=label.style_label_left, size=size.small)
 
-    // [修正2] daily_vwap_label の label.new が未実装だったため追加
     if not na(daily_vwap_value)
         daily_vwap_label := label.new(label_x, daily_vwap_value, text="VWAP：" + str.tostring(daily_vwap_value, "#.##"), color=color.new(daily_vwap_color, 80), textcolor=daily_vwap_color, style=label.style_label_left, size=size.small)
 
-// テーブル表示（日足以上では表示しない）
 if show_table and show_label_condition and not timeframe.isdwm and show_daily_ohlc
     table_pos = switch table_position
         "右上" => position.top_right
@@ -307,17 +301,18 @@ if show_table and show_label_condition and not timeframe.isdwm and show_daily_oh
         "右下" => position.bottom_right
         "左下" => position.bottom_left
         => position.top_right
-    
-    var table info_table = table.new(table_pos, 2, 7, bgcolor=color.white, border_width=1, border_color=color.gray)
-    
-    target_year = int(target_date / 10000)
+
+    table.delete(info_table)
+    info_table := table.new(table_pos, 2, 7, bgcolor=color.white, border_width=1, border_color=color.gray)
+
+    target_year  = int(target_date / 10000)
     target_month = int((target_date % 10000) / 100)
-    target_day = int(target_date % 100)
+    target_day   = int(target_date % 100)
     target_date_str = str.tostring(target_year) + "/" + str.tostring(target_month) + "/" + str.tostring(target_day)
-    
+
     table.cell(info_table, 0, 0, "項目", text_color=color.black, bgcolor=color.new(color.gray, 50), text_size=size.normal)
     table.cell(info_table, 1, 0, "価格", text_color=color.black, bgcolor=color.new(color.gray, 50), text_size=size.normal)
-    
+
     table.cell(info_table, 0, 1, "対象日", text_color=color.black, text_size=size.normal)
     table.cell(info_table, 1, 1, target_date_str, text_color=color.black, text_size=size.normal)
     table.cell(info_table, 0, 2, "始値", text_color=color.black, text_size=size.normal)
